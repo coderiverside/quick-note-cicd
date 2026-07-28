@@ -1,0 +1,592 @@
+openapi: 3.0.3
+info:
+  title: Notes Management API
+  description: >
+    REST API for a personal note-taking service (notes, labels, and
+    checklist items) for an authenticated user. Authentication and RBAC are
+    delegated to Keycloak (OIDC); see the `bearerAuth` security scheme below.
+    See specs/001-notes-api/spec.md.
+  version: "1.0.0"
+servers:
+  - url: /api/v1
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Notes
+  - name: Checklist Items
+  - name: Labels
+
+paths:
+  /notes:
+    get:
+      tags: [Notes]
+      summary: List the authenticated user's notes
+      description: >
+        Returns notes owned by the caller. Defaults to the active view
+        (excludes archived and trashed notes, FR-008). Supports filtering by
+        view, label, and full-text search keyword, and is always paginated.
+      parameters:
+        - $ref: '#/components/parameters/ViewParam'
+        - $ref: '#/components/parameters/LabelIdParam'
+        - $ref: '#/components/parameters/SearchParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          description: Paginated list of notes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Notes]
+      summary: Create a note
+      description: >
+        Creates a plain-text or checklist-style note. Rejected if title,
+        content, and checklist items are all empty (FR-001).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteCreateRequest'
+      responses:
+        '201':
+          description: Note created
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /notes/{noteId}:
+    parameters:
+      - $ref: '#/components/parameters/NoteIdParam'
+    get:
+      tags: [Notes]
+      summary: Get a single note owned by the caller
+      responses:
+        '200':
+          description: The note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Notes]
+      summary: Update a note's title, content, or color
+      description: Partial update. Lifecycle transitions (pin/archive/trash) use the dedicated action endpoints below (FR-003, FR-005, FR-006).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteUpdateRequest'
+      responses:
+        '200':
+          description: Updated note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Notes]
+      summary: Permanently delete a trashed note
+      description: >
+        Only permitted once a note is trashed (FR-004). Permanently deleting
+        a note that is not yet trashed is rejected — trash it first.
+      responses:
+        '204':
+          description: Note permanently deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Note is not currently trashed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /notes/{noteId}/pin:
+    parameters:
+      - $ref: '#/components/parameters/NoteIdParam'
+    post:
+      tags: [Notes]
+      summary: Pin a note (FR-006)
+      responses:
+        '200': { description: Note pinned, content: { application/json: { schema: { $ref: '#/components/schemas/Note' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Notes]
+      summary: Unpin a note (FR-006)
+      responses:
+        '200': { description: Note unpinned, content: { application/json: { schema: { $ref: '#/components/schemas/Note' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notes/{noteId}/archive:
+    parameters:
+      - $ref: '#/components/parameters/NoteIdParam'
+    post:
+      tags: [Notes]
+      summary: Archive a note (FR-007)
+      description: Rejected with 409 if the note is currently trashed (FR-010) — restore it first.
+      responses:
+        '200': { description: Note archived, content: { application/json: { schema: { $ref: '#/components/schemas/Note' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Note is currently trashed; restore before archiving
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Notes]
+      summary: Unarchive a note (FR-007)
+      responses:
+        '200': { description: Note unarchived, content: { application/json: { schema: { $ref: '#/components/schemas/Note' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notes/{noteId}/trash:
+    parameters:
+      - $ref: '#/components/parameters/NoteIdParam'
+    post:
+      tags: [Notes]
+      summary: Move a note to trash (FR-011)
+      responses:
+        '200': { description: Note trashed, content: { application/json: { schema: { $ref: '#/components/schemas/Note' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Notes]
+      summary: Restore a note from trash (FR-011)
+      description: Restores the note to its prior active/archived organization (color, pin, labels preserved).
+      responses:
+        '200': { description: Note restored, content: { application/json: { schema: { $ref: '#/components/schemas/Note' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notes/{noteId}/labels/{labelId}:
+    parameters:
+      - $ref: '#/components/parameters/NoteIdParam'
+      - $ref: '#/components/parameters/LabelIdParam'
+    put:
+      tags: [Notes]
+      summary: Apply a label to a note (FR-019)
+      description: Idempotent — applying an already-applied label is a no-op success.
+      responses:
+        '200': { description: Note with label applied, content: { application/json: { schema: { $ref: '#/components/schemas/Note' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Notes]
+      summary: Remove a label from a note (FR-019)
+      description: Removes the association only; the label itself is not deleted.
+      responses:
+        '200': { description: Note with label removed, content: { application/json: { schema: { $ref: '#/components/schemas/Note' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notes/{noteId}/items:
+    parameters:
+      - $ref: '#/components/parameters/NoteIdParam'
+    post:
+      tags: [Checklist Items]
+      summary: Add a checklist item to a note (FR-023)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChecklistItemCreateRequest'
+      responses:
+        '201':
+          description: Item added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notes/{noteId}/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/NoteIdParam'
+      - name: itemId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [Checklist Items]
+      summary: Update a checklist item's text and/or checked state (FR-024, FR-025)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChecklistItemUpdateRequest'
+      responses:
+        '200':
+          description: Updated note (including the updated item)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Checklist Items]
+      summary: Remove a checklist item from a note (FR-023)
+      responses:
+        '204':
+          description: Item removed
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /labels:
+    get:
+      tags: [Labels]
+      summary: List the authenticated user's labels
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          description: Paginated list of labels
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Labels]
+      summary: Create a label (FR-016)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LabelCreateRequest'
+      responses:
+        '201':
+          description: Label created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Label'
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: A label with this name already exists for this user (FR-021)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /labels/{labelId}:
+    parameters:
+      - $ref: '#/components/parameters/LabelIdParam'
+    patch:
+      tags: [Labels]
+      summary: Rename a label (FR-017)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LabelUpdateRequest'
+      responses:
+        '200':
+          description: Updated label
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Label'
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: A label with this name already exists for this user (FR-021)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Labels]
+      summary: Delete a label (FR-017)
+      description: Removes the label from every note it was applied to; the notes themselves are unaffected (FR-018).
+      responses:
+        '204':
+          description: Label deleted
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Bearer JWT issued by Keycloak (realm `quicknote`, client `notes-api`).
+        The token's `sub` claim identifies the resource owner; the token MUST
+        carry the `user` realm role (see the Forbidden response) to access
+        any endpoint below.
+
+  parameters:
+    NoteIdParam:
+      name: noteId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LabelIdParam:
+      name: labelId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ViewParam:
+      name: view
+      in: query
+      description: Which lifecycle view of notes to return (FR-008, FR-009, FR-012).
+      schema:
+        type: string
+        enum: [active, archived, trashed]
+        default: active
+    SearchParam:
+      name: search
+      in: query
+      description: Full-text keyword search over title and content (FR-026). Trashed notes are always excluded from search results.
+      schema: { type: string }
+    PageParam:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    SizeParam:
+      name: size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    Unauthorized:
+      description: Missing, invalid, or expired Keycloak-issued bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: >
+        Token is valid but the caller lacks the `user` realm role required to
+        access this API (RBAC failure). Distinct from 404, which is used when
+        the caller has the required role but the specific resource does not
+        belong to them (FR-015).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource does not exist or is not owned by the caller (FR-015)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: Request failed validation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    NoteColor:
+      type: string
+      description: A fixed palette of supported note colors (Assumption A4).
+      enum:
+        - DEFAULT
+        - RED
+        - ORANGE
+        - YELLOW
+        - GREEN
+        - TEAL
+        - BLUE
+        - PURPLE
+        - PINK
+        - BROWN
+        - GRAY
+
+    ChecklistItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        text: { type: string }
+        checked: { type: boolean }
+        position: { type: integer, readOnly: true }
+      required: [id, text, checked, position]
+
+    ChecklistItemCreateRequest:
+      type: object
+      properties:
+        text: { type: string, minLength: 1 }
+      required: [text]
+
+    ChecklistItemUpdateRequest:
+      type: object
+      description: At least one of text or checked must be provided.
+      properties:
+        text: { type: string, minLength: 1 }
+        checked: { type: boolean }
+
+    Note:
+      type: object
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        title: { type: string, nullable: true }
+        content: { type: string, nullable: true }
+        color: { $ref: '#/components/schemas/NoteColor' }
+        pinned: { type: boolean }
+        archived: { type: boolean }
+        trashed: { type: boolean }
+        labelIds:
+          type: array
+          items: { type: string, format: uuid }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChecklistItem'
+        createdAt: { type: string, format: date-time, readOnly: true }
+        updatedAt: { type: string, format: date-time, readOnly: true }
+      required: [id, pinned, archived, trashed, labelIds, items, createdAt, updatedAt]
+
+    NoteCreateRequest:
+      type: object
+      description: >
+        At least one of title, content, or a non-empty items array is required
+        (FR-001) — enforced by the service layer, not representable as a plain
+        JSON Schema constraint.
+      properties:
+        title: { type: string, nullable: true }
+        content: { type: string, nullable: true }
+        color: { $ref: '#/components/schemas/NoteColor' }
+        labelIds:
+          type: array
+          items: { type: string, format: uuid }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChecklistItemCreateRequest'
+
+    NoteUpdateRequest:
+      type: object
+      description: Partial update; omitted fields are left unchanged.
+      properties:
+        title: { type: string, nullable: true }
+        content: { type: string, nullable: true }
+        color: { $ref: '#/components/schemas/NoteColor' }
+
+    NotePage:
+      type: object
+      properties:
+        content:
+          type: array
+          items: { $ref: '#/components/schemas/Note' }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+      required: [content, page, size, totalElements]
+
+    Label:
+      type: object
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name: { type: string }
+        createdAt: { type: string, format: date-time, readOnly: true }
+      required: [id, name, createdAt]
+
+    LabelCreateRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+      required: [name]
+
+    LabelUpdateRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+      required: [name]
+
+    LabelPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items: { $ref: '#/components/schemas/Label' }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+      required: [content, page, size, totalElements]
+
+    Error:
+      type: object
+      description: Single consistent error envelope (constitution Principle I).
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details:
+              type: array
+              items: { type: string }
+          required: [code, message]
+      required: [error]

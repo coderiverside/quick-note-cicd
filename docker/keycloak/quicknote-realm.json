@@ -1,0 +1,90 @@
+{
+  "realm": "quicknote",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 1800,
+  "roles": {
+    "realm": [
+      {
+        "name": "user",
+        "description": "Baseline role required to call any Notes API endpoint (RBAC gate)"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "notes-api",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true
+    }
+  ],
+  "users": [
+    {
+      "username": "test-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "test-user@example.com",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test-user",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "user"
+      ],
+      "firstName": "Test",
+      "lastName": "User",
+      "requiredActions": []
+    },
+    {
+      "username": "other-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "other-user@example.com",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "other-user",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "user"
+      ],
+      "firstName": "Other",
+      "lastName": "User",
+      "requiredActions": []
+    },
+    {
+      "username": "no-role-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "no-role-user@example.com",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "no-role-user",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [],
+      "firstName": "NoRole",
+      "lastName": "User",
+      "requiredActions": []
+    }
+  ]
+}

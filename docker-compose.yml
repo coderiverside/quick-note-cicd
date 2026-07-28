@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quicknote-postgres
+    environment:
+      POSTGRES_DB: quicknote
+      POSTGRES_USER: quicknote
+      POSTGRES_PASSWORD: quicknote
+    ports:
+      - "5432:5432"
+    volumes:
+      - quicknote-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quicknote -d quicknote"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: quicknote-keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      # Local development credentials only - never reuse these anywhere shared.
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_PORT: "8180"
+      # Tokens are requested from the host (Postman, curl, the browser), so the
+      # issuer they carry must be the host-visible URL. Without this, a token
+      # fetched from localhost:8180 is rejected by the API container, which
+      # reaches Keycloak under a different name.
+      KC_HOSTNAME: http://localhost:8180
+      # ...while the API container still resolves the JWKS and token endpoints
+      # over the compose network, where "localhost" would mean itself.
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    ports:
+      - "8180:8180"
+    volumes:
+      - ./docker/keycloak/quicknote-realm.json:/opt/keycloak/data/import/quicknote-realm.json:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  notes-api:
+    build:
+      context: .
+      dockerfile: src/main/docker/Dockerfile.jvm
+    container_name: quicknote-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/quicknote
+      DB_USERNAME: quicknote
+      DB_PASSWORD: quicknote
+      OIDC_AUTH_SERVER_URL: http://keycloak:8180/realms/quicknote
+      OIDC_CLIENT_ID: notes-api
+    ports:
+      - "8080:8080"
+
+volumes:
+  quicknote-pgdata:
