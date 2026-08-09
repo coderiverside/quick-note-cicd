@@ -12,6 +12,7 @@ on:
 
 permissions:
     contents: read
+    pull-requests: write
 
 jobs:
     build:
@@ -20,13 +21,40 @@ jobs:
         steps:
             - name : Checkout source code
               uses: actions/checkout@v4
-            
+
             - name : Set up JDK 21
               uses: actions/setup-java@v4
               with:
                   distribution: temurin
                   java-version: 21
                   cache: maven
-            
+
             - name : Build and test with Maven
               run: ./mvnw -B clean verify
+
+            # Uploaded even when verify fails, so a coverage-threshold failure can
+            # be diagnosed from the report instead of from the build log alone.
+            - name : Upload JaCoCo coverage report
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: jacoco-report
+                  path: target/jacoco-report
+                  if-no-files-found: warn
+
+            # Informative only: this action never fails the job. The gate is
+            # jacoco:check in the pom, which already ran during verify.
+            - name : Publish coverage summary on the pull request
+              if: github.event_name == 'pull_request'
+              uses: madrapps/jacoco-report@v1.8.0
+              with:
+                  paths: ${{ github.workspace }}/target/jacoco-report/jacoco.xml
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  title: Code coverage
+                  update-comment: true
+                  # LINE to match the pom rule; the action defaults to INSTRUCTION,
+                  # which would report a different number under the same threshold.
+                  coverage-counter-type: LINE
+                  # Keep in sync with jacoco.line-coverage.minimum in pom.xml.
+                  min-coverage-overall: 85
+                  min-coverage-changed-lines: 80
