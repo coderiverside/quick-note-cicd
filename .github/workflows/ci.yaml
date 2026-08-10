@@ -105,8 +105,8 @@ jobs:
                   if-no-files-found: error
                   retention-days: 7
 
-    package:
-        name: Package
+    image:
+        name: Build container image
         needs: build
         runs-on: ubuntu-latest
         # Nothing is compiled here; the cost is pulling the base image.
