@@ -1,15 +1,13 @@
 name: CI
 
-# Only main on push; every other branch is covered through its pull request.
-# Both triggers would build the same commit twice.
 on:
     push:
         branches:
           - main
+          - develop
     pull_request:
         branches:
           - main
-          - develop
 
 permissions:
     contents: read
