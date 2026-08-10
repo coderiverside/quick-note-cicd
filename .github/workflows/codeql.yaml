@@ -1,0 +1,65 @@
+name: CodeQL
+
+on:
+    push:
+        branches:
+          - main
+          - develop
+    pull_request:
+        branches:
+          - main
+          - develop
+    # CodeQL ships new queries continuously, so unchanged code can start failing
+    # a scan. The weekly run is what catches those; the push/PR runs never would.
+    schedule:
+      - cron: '0 6 * * 1'
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+    analyze:
+        name: Analyze Java
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        permissions:
+            # Required to upload the results to the Security tab.
+            security-events: write
+            # Required by the action to read the workflow run status on private repos.
+            actions: read
+            contents: read
+
+        steps:
+            - name: Checkout source code
+              uses: actions/checkout@v7
+
+            - name: Set up JDK 21
+              uses: actions/setup-java@v5
+              with:
+                  distribution: temurin
+                  java-version: 21
+                  cache: maven
+
+            - name: Initialize CodeQL
+              uses: github/codeql-action/init@v4
+              with:
+                  languages: java-kotlin
+                  # `manual` rather than `none`: without a real build CodeQL guesses
+                  # the dependencies, and taint tracking through Jakarta REST and
+                  # Panache is only accurate with the resolved classpath.
+                  build-mode: manual
+
+            # `compile` and not `package`: CodeQL needs the compiled main sources
+            # and their classpath, not the Quarkus augmentation output. Tests are
+            # not compiled at this phase, so no Dev Services containers are started.
+            - name: Compile
+              run: ./mvnw -B -ntp clean compile
+
+            - name: Perform CodeQL analysis
+              uses: github/codeql-action/analyze@v4
+              with:
+                  category: /language:java-kotlin
