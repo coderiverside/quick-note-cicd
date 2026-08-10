@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18
     container_name: quicknote-postgres
     environment:
       POSTGRES_DB: quicknote
@@ -17,7 +17,7 @@ services:
       retries: 10
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.7.0
     container_name: quicknote-keycloak
     command: ["start-dev", "--import-realm"]
     environment:

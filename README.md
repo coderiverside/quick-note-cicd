@@ -10,13 +10,23 @@ role-based access control delegated to Keycloak.
 ## Quick start
 
 ```bash
-docker compose up -d      # PostgreSQL + Keycloak (realm imported automatically)
 ./mvnw quarkus:dev        # or: mvn quarkus:dev
 ```
 
-In dev and test mode you do not need `docker compose` at all — Quarkus Dev
-Services starts a PostgreSQL and a Keycloak container automatically, importing
-the same realm file.
+That is all: in dev and test mode Quarkus Dev Services starts a PostgreSQL and a
+Keycloak container automatically, importing the same realm file `docker compose`
+uses. Keycloak is published on `localhost:8180`, so tokens are requested from
+`http://localhost:8180/realms/quicknote/protocol/openid-connect/token`.
+
+`docker compose` runs the whole stack in containers instead, which is also what
+you want if the notes must survive a restart. Package first — the image ships
+the fast-jar rather than building it — and do not leave `quarkus:dev` running,
+since its Keycloak holds port 8180:
+
+```bash
+./mvnw package
+docker compose up -d --build
+```
 
 For the full walkthrough — obtaining a token, exercising every user story, and
 the expected responses — see
