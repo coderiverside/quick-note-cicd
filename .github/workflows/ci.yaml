@@ -12,12 +12,25 @@ on:
 
 permissions:
     contents: read
-    pull-requests: write
+
+# Superseding pushes to the same PR cancel the previous run; pushes to main and
+# develop are left to finish, since their run is what produces the artifact.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
     build:
         name: Build and test
         runs-on: ubuntu-latest
+        # The test suite starts PostgreSQL and Keycloak containers; without this a
+        # container that never becomes ready would hang for the 6 hour default.
+        timeout-minutes: 30
+        permissions:
+            contents: read
+            # Only the coverage comment needs write access, so it is scoped here
+            # instead of granting it to every job the workflow may grow.
+            pull-requests: write
         steps:
             - name : Checkout source code
               uses: actions/checkout@v7
@@ -29,8 +42,14 @@ jobs:
                   java-version: 21
                   cache: maven
 
+            # Formatting is checked before the suite runs: spotless is bound to
+            # verify in the pom, so otherwise a misplaced import only fails after
+            # several minutes of container-backed tests.
+            - name : Check formatting
+              run: ./mvnw -B -ntp spotless:check
+
             - name : Build and test with Maven
-              run: ./mvnw -B clean verify
+              run: ./mvnw -B -ntp clean verify
 
             # The reports for the failing tests are the whole point of this step,
             # so it must run on failure too.
