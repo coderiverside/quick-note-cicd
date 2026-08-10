@@ -1,10 +1,11 @@
 name: CI
 
+# Only main on push; every other branch is covered through its pull request.
+# Both triggers would build the same commit twice.
 on:
     push:
         branches:
           - main
-          - develop
     pull_request:
         branches:
           - main
@@ -13,8 +14,7 @@ on:
 permissions:
     contents: read
 
-# Superseding pushes to the same PR cancel the previous run; pushes to main and
-# develop are left to finish, since their run is what produces the artifact.
+# Pushes to main are left to finish: their run produces the artifact.
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -23,8 +23,6 @@ jobs:
     build:
         name: Build and test
         runs-on: ubuntu-latest
-        # The test suite starts PostgreSQL and Keycloak containers; without this a
-        # container that never becomes ready would hang for the 6 hour default.
         timeout-minutes: 30
         permissions:
             contents: read
@@ -48,13 +46,15 @@ jobs:
             - name : Check formatting
               run: ./mvnw -B -ntp spotless:check
 
+            # Spotless already ran above; the pom binds it to verify for local
+            # builds, which have no such preceding step.
             - name : Build and test with Maven
-              run: ./mvnw -B -ntp clean verify
+              run: ./mvnw -B -ntp verify -Dspotless.check.skip=true
 
-            # The reports for the failing tests are the whole point of this step,
-            # so it must run on failure too.
+            # The reports for the failing tests are the whole point of this
+            # step, so it must run on failure too.
             - name : Upload test reports
-              if: always()
+              if: ${{ !cancelled() }}
               uses: actions/upload-artifact@v7
               with:
                   name: test-reports
@@ -65,7 +65,7 @@ jobs:
             # Uploaded even when verify fails, so a coverage-threshold failure can
             # be diagnosed from the report instead of from the build log alone.
             - name : Upload JaCoCo coverage report
-              if: always()
+              if: ${{ !cancelled() }}
               uses: actions/upload-artifact@v7
               with:
                   name: jacoco-report
@@ -73,27 +73,32 @@ jobs:
                   if-no-files-found: warn
                   retention-days: 7
 
+            # The pom is the single source of truth
+            - name : Read coverage thresholds from the POM
+              id: thresholds
+              if: github.event_name == 'pull_request'
+              run: |
+                  overall=$(./mvnw -B -ntp -q help:evaluate -Dexpression=jacoco.line-coverage.minimum -DforceStdout)
+                  changed=$(./mvnw -B -ntp -q help:evaluate -Dexpression=jacoco.changed-lines-coverage.minimum -DforceStdout)
+                  echo "overall=$(awk "BEGIN { print $overall * 100 }")" >> "$GITHUB_OUTPUT"
+                  echo "changed=$(awk "BEGIN { print $changed * 100 }")" >> "$GITHUB_OUTPUT"
+
             # Informative only: this action never fails the job. The gate is
             # jacoco:check in the pom, which already ran during verify.
             - name : Publish coverage summary on the pull request
               if: github.event_name == 'pull_request'
-              uses: madrapps/jacoco-report@v1.8.0
+              # SHA-pinned: third-party action running with a token that can
+              # write to pull requests.
+              uses: madrapps/jacoco-report@e51ce1f46f7f8b5331593f935e59cbaf44b84920 # v1.8.0
               with:
                   paths: ${{ github.workspace }}/target/jacoco-report/jacoco.xml
                   token: ${{ secrets.GITHUB_TOKEN }}
                   title: Code coverage
                   update-comment: true
-                  # LINE to match the pom rule; the action defaults to INSTRUCTION,
-                  # which would report a different number under the same threshold.
                   coverage-counter-type: LINE
-                  # Keep in sync with jacoco.line-coverage.minimum in pom.xml.
-                  min-coverage-overall: 85
-                  min-coverage-changed-lines: 80
+                  min-coverage-overall: ${{ steps.thresholds.outputs.overall }}
+                  min-coverage-changed-lines: ${{ steps.thresholds.outputs.changed }}
 
-            # No `if:`, so this is skipped when an earlier step fails: a runnable
-            # artifact is only published for a build that passed tests, coverage
-            # and format checks. `error` turns a packaging regression into a
-            # failure instead of an empty artifact nobody notices.
             - name : Upload application artifact
               uses: actions/upload-artifact@v7
               with:
@@ -101,3 +106,50 @@ jobs:
                   path: target/quarkus-app/
                   if-no-files-found: error
                   retention-days: 7
+
+    package:
+        name: Package
+        needs: build
+        runs-on: ubuntu-latest
+        # Nothing is compiled here; the cost is pulling the base image.
+        timeout-minutes: 15
+        steps:
+            - name : Checkout source code
+              uses: actions/checkout@v7
+
+            # The fast-jar the build job already produced, so the image does
+            # not recompile the commit that was just built.
+            - name : Download application artifact
+              uses: actions/download-artifact@v7
+              with:
+                  name: quick-note-app
+                  path: target/quarkus-app
+
+            - name : Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            # Not pushed; `load: true` puts it in the runner daemon so the
+            # check below can run it.
+            - name : Build Docker Image
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: src/main/docker/Dockerfile.jvm
+                  push: false
+                  load: true
+                  tags: notes-api:${{ github.sha }}
+
+            # Catches a Quarkus upgrade renaming one of the four copied paths.
+            # The application is not booted: that needs Postgres and Keycloak,
+            # which belong to an integration job.
+            - name : Verify the image layout
+              run: |
+                  docker run --rm --entrypoint /bin/sh notes-api:${{ github.sha }} -c '
+                      test -f /deployments/quarkus-run.jar || { echo "missing /deployments/quarkus-run.jar"; exit 1; }
+                      for dir in lib app quarkus; do
+                          test -d "/deployments/$dir" || { echo "missing /deployments/$dir"; exit 1; }
+                      done
+                      # A mismatch here means an unreadable jar.
+                      test "$(id -u)" = "185" || { echo "expected uid 185, got $(id -u)"; exit 1; }
+                      java -version
+                  '
