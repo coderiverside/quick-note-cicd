@@ -8,11 +8,12 @@ on:
     pull_request:
         branches:
           - main
+          - develop
 
 permissions:
     contents: read
 
-# Pushes to main are left to finish: their run produces the artifact.
+# Only pull requests are cancelled: a push run produces the artifact.
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -24,8 +25,7 @@ jobs:
         timeout-minutes: 30
         permissions:
             contents: read
-            # Only the coverage comment needs write access, so it is scoped here
-            # instead of granting it to every job the workflow may grow.
+            # Only the coverage comment writes, so the scope stops at this job.
             pull-requests: write
         steps:
             - name : Checkout source code
@@ -38,19 +38,16 @@ jobs:
                   java-version: 21
                   cache: maven
 
-            # Formatting is checked before the suite runs: spotless is bound to
-            # verify in the pom, so otherwise a misplaced import only fails after
-            # several minutes of container-backed tests.
+            # Before the suite: spotless is bound to verify, so a misplaced
+            # import would otherwise fail only after minutes of tests.
             - name : Check formatting
               run: ./mvnw -B -ntp spotless:check
 
-            # Spotless already ran above; the pom binds it to verify for local
-            # builds, which have no such preceding step.
+            # Spotless already ran; the pom binds it to verify for local builds.
             - name : Build and test with Maven
               run: ./mvnw -B -ntp verify -Dspotless.check.skip=true
 
-            # The reports for the failing tests are the whole point of this
-            # step, so it must run on failure too.
+            # Runs on failure too: the reports of the failing tests are the point.
             - name : Upload test reports
               if: ${{ !cancelled() }}
               uses: actions/upload-artifact@v7
@@ -60,8 +57,8 @@ jobs:
                   if-no-files-found: warn
                   retention-days: 7
 
-            # Uploaded even when verify fails, so a coverage-threshold failure can
-            # be diagnosed from the report instead of from the build log alone.
+            # Also on failure: a coverage-threshold breach is diagnosed from the
+            # report, not from the build log.
             - name : Upload JaCoCo coverage report
               if: ${{ !cancelled() }}
               uses: actions/upload-artifact@v7
@@ -71,7 +68,7 @@ jobs:
                   if-no-files-found: warn
                   retention-days: 7
 
-            # The pom is the single source of truth
+            # Read from the pom so the numbers cannot drift from the gate.
             - name : Read coverage thresholds from the POM
               id: thresholds
               if: github.event_name == 'pull_request'
@@ -81,12 +78,11 @@ jobs:
                   echo "overall=$(awk "BEGIN { print $overall * 100 }")" >> "$GITHUB_OUTPUT"
                   echo "changed=$(awk "BEGIN { print $changed * 100 }")" >> "$GITHUB_OUTPUT"
 
-            # Informative only: this action never fails the job. The gate is
-            # jacoco:check in the pom, which already ran during verify.
+            # Informative only: it never fails the job. The gate is jacoco:check
+            # in the pom, which already ran during verify.
             - name : Publish coverage summary on the pull request
               if: github.event_name == 'pull_request'
-              # SHA-pinned: third-party action running with a token that can
-              # write to pull requests.
+              # SHA-pinned: third-party action holding a PR-write token.
               uses: madrapps/jacoco-report@e51ce1f46f7f8b5331593f935e59cbaf44b84920 # v1.8.0
               with:
                   paths: ${{ github.workspace }}/target/jacoco-report/jacoco.xml
@@ -109,14 +105,13 @@ jobs:
         name: Build container image
         needs: build
         runs-on: ubuntu-latest
-        # Nothing is compiled here; the cost is pulling the base image.
+        # Nothing compiles here; the cost is pulling the base image.
         timeout-minutes: 15
         steps:
             - name : Checkout source code
               uses: actions/checkout@v7
 
-            # The fast-jar the build job already produced, so the image does
-            # not recompile the commit that was just built.
+            # Reuses the fast-jar from build instead of recompiling the commit.
             - name : Download application artifact
               uses: actions/download-artifact@v7
               with:
@@ -126,8 +121,7 @@ jobs:
             - name : Set up Docker Buildx
               uses: docker/setup-buildx-action@v4
 
-            # Not pushed; `load: true` puts it in the runner daemon so the
-            # check below can run it.
+            # Not pushed: `load: true` is all the check below needs.
             - name : Build Docker Image
               uses: docker/build-push-action@v7
               with:
@@ -138,16 +132,21 @@ jobs:
                   tags: notes-api:${{ github.sha }}
 
             # Catches a Quarkus upgrade renaming one of the four copied paths.
-            # The application is not booted: that needs Postgres and Keycloak,
-            # which belong to an integration job.
+            # Booting the application would need Postgres and Keycloak, so that
+            # belongs to an integration job.
             - name : Verify the image layout
               run: |
+                  # --entrypoint leaves USER alone, so the tests below are
+                  # answered with the permissions the application will have.
                   docker run --rm --entrypoint /bin/sh notes-api:${{ github.sha }} -c '
                       test -f /deployments/quarkus-run.jar || { echo "missing /deployments/quarkus-run.jar"; exit 1; }
+                      test -r /deployments/quarkus-run.jar || { echo "/deployments/quarkus-run.jar not readable by uid $(id -u)"; exit 1; }
                       for dir in lib app quarkus; do
                           test -d "/deployments/$dir" || { echo "missing /deployments/$dir"; exit 1; }
+                          test -r "/deployments/$dir" && test -x "/deployments/$dir" || { echo "/deployments/$dir not usable by uid $(id -u)"; exit 1; }
                       done
-                      # A mismatch here means an unreadable jar.
+                      # Guards the Dockerfile, not the copy: a regenerated
+                      # template that moves USER off 185 lands here.
                       test "$(id -u)" = "185" || { echo "expected uid 185, got $(id -u)"; exit 1; }
                       java -version
                   '
