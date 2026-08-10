@@ -124,12 +124,12 @@ jobs:
                   path: target/quarkus-app
 
             - name : Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             # Not pushed; `load: true` puts it in the runner daemon so the
             # check below can run it.
             - name : Build Docker Image
-              uses: docker/build-push-action@v6
+              uses: docker/build-push-action@v7
               with:
                   context: .
                   file: src/main/docker/Dockerfile.jvm
