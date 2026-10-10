@@ -101,52 +101,72 @@ jobs:
                   if-no-files-found: error
                   retention-days: 7
 
+    
     image:
         name: Build container image
         needs: build
         runs-on: ubuntu-latest
-        # Nothing compiles here; the cost is pulling the base image.
         timeout-minutes: 15
+
+        permissions:
+            contents: read
+            id-token: write
+
         steps:
-            - name : Checkout source code
+            - name: Checkout source code
               uses: actions/checkout@v7
 
-            # Reuses the fast-jar from build instead of recompiling the commit.
-            - name : Download application artifact
+            - name: Download application artifact
               uses: actions/download-artifact@v7
               with:
-                  name: quick-note-app
+                  name: quick-note-api
                   path: target/quarkus-app
 
-            - name : Set up Docker Buildx
+            - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v4
 
-            # Not pushed: `load: true` is all the check below needs.
-            - name : Build Docker Image
+            # Build locally first, so the image can be verified before publishing.
+            - name: Build Docker image
               uses: docker/build-push-action@v7
               with:
                   context: .
                   file: src/main/docker/Dockerfile.jvm
                   push: false
                   load: true
-                  tags: notes-api:${{ github.sha }}
+                  tags: quick-note-api:${{ github.sha }}
 
-            # Catches a Quarkus upgrade renaming one of the four copied paths.
-            # Booting the application would need Postgres and Keycloak, so that
-            # belongs to an integration job.
-            - name : Verify the image layout
+            # Verify the image before publishing it.
+            - name: Verify the image layout
               run: |
-                  # --entrypoint leaves USER alone, so the tests below are
-                  # answered with the permissions the application will have.
-                  docker run --rm --entrypoint /bin/sh notes-api:${{ github.sha }} -c '
+                  docker run --rm --entrypoint /bin/sh quick-note-api:${{ github.sha }} -c '
                       test -f /deployments/quarkus-run.jar || { echo "missing /deployments/quarkus-run.jar"; exit 1; }
                       test -r /deployments/quarkus-run.jar || { echo "/deployments/quarkus-run.jar not readable by uid $(id -u)"; exit 1; }
                       for dir in lib app quarkus; do
                           test -d "/deployments/$dir" || { echo "missing /deployments/$dir"; exit 1; }
                           test -r "/deployments/$dir" && test -x "/deployments/$dir" || { echo "/deployments/$dir not usable by uid $(id -u)"; exit 1; }
                       done
-                      # Guards the Dockerfile, not the copy: a regenerated
-                      # template that moves USER off 185 lands here.
                       test "$(id -u)" = "185" || { echo "expected uid 185, got $(id -u)"; exit 1; }
                       java -version
                   '
+
+            # AWS authentication is only needed for pushes, not pull requests.
+            - name: Configure AWS credentials
+              if: github.event_name == 'push'
+              uses: aws-actions/configure-aws-credentials@v6
+              with:
+                  role-to-assume: arn:aws:iam::734143850199:role/GitHubActionsquickNoteApiECRRole
+                  aws-region: us-west-2
+
+            - name: Login to Amazon ECR
+              if: github.event_name == 'push'
+              id: login-ecr
+              uses: aws-actions/amazon-ecr-login@v2
+
+            - name: Push image to Amazon ECR
+              if: github.event_name == 'push'
+              env:
+                  ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+                  IMAGE_TAG: ${{ github.sha }}
+              run: |
+                  docker tag quick-note-api:${IMAGE_TAG} ${ECR_REGISTRY}/quick-note-api:${IMAGE_TAG}
+                  docker push ${ECR_REGISTRY}/quick-note-api:${IMAGE_TAG}
