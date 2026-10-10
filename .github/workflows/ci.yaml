@@ -168,5 +168,5 @@ jobs:
                   ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
                   IMAGE_TAG: ${{ github.sha }}
               run: |
-                  docker tag quick-note-api:${IMAGE_TAG} ${ECR_REGISTRY}/quick-note-api:${IMAGE_TAG}
-                  docker push ${ECR_REGISTRY}/quick-note-api:${IMAGE_TAG}
+                  docker tag quick-note-api:${IMAGE_TAG} ${ECR_REGISTRY}/coderiverside/quick-note-api:${IMAGE_TAG}
+                  docker push ${ECR_REGISTRY}/coderiverside/quick-note-api:${IMAGE_TAG}
