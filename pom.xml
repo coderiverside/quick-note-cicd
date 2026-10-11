@@ -13,10 +13,19 @@
     <maven.compiler.release>21</maven.compiler.release>
     <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
     <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-    <quarkus.platform.version>3.37.3</quarkus.platform.version>
-    <skipITs>false</skipITs>
-    <surefire-plugin.version>3.5.2</surefire-plugin.version>
-    <spotless-plugin.version>2.43.0</spotless-plugin.version>
+    <quarkus.platform.version>3.38.1</quarkus.platform.version>
+    <compiler-plugin.version>3.15.0</compiler-plugin.version>
+    <surefire-plugin.version>3.5.6</surefire-plugin.version>
+    <spotless-plugin.version>3.9.0</spotless-plugin.version>
+    <jacoco-plugin.version>0.8.15</jacoco-plugin.version>
+    <!-- Minimums enforced by jacoco:check during verify (currently ~94% / ~77%). -->
+    <jacoco.line-coverage.minimum>0.85</jacoco.line-coverage.minimum>
+    <jacoco.branch-coverage.minimum>0.70</jacoco.branch-coverage.minimum>
+    <!--
+      Read by CI via help:evaluate to label its coverage comment, not by any
+      plugin. Applies only to lines changed by the pull request.
+    -->
+    <jacoco.changed-lines-coverage.minimum>0.80</jacoco.changed-lines-coverage.minimum>
   </properties>
 
   <dependencyManagement>
@@ -95,12 +104,22 @@
     <!-- Testing -->
     <dependency>
       <groupId>io.quarkus</groupId>
-      <artifactId>quarkus-junit5</artifactId>
+      <artifactId>quarkus-junit</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>io.rest-assured</groupId>
       <artifactId>rest-assured</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      Coverage. The plain JaCoCo agent cannot see classes loaded by the Quarkus
+      test classloader, so the extension is what actually instruments the code
+      under @QuarkusTest; jacoco-maven-plugin below only reads its exec file.
+    -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-jacoco</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -124,6 +143,14 @@
       </plugin>
 
       <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${compiler-plugin.version}</version>
+        <configuration>
+          <parameters>true</parameters>
+        </configuration>
+      </plugin>
+
+      <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>${surefire-plugin.version}</version>
         <configuration>
@@ -140,6 +167,42 @@
             <maven.home>${maven.home}</maven.home>
           </systemPropertyVariables>
         </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>jacoco-check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <!-- Written by the quarkus-jacoco extension, not by prepare-agent. -->
+              <dataFile>${project.build.directory}/jacoco-quarkus.exec</dataFile>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${jacoco.line-coverage.minimum}</minimum>
+                    </limit>
+                    <limit>
+                      <counter>BRANCH</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${jacoco.branch-coverage.minimum}</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
 
       <plugin>
