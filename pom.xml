@@ -19,7 +19,7 @@
     <spotless-plugin.version>3.9.0</spotless-plugin.version>
     <jacoco-plugin.version>0.8.15</jacoco-plugin.version>
     <!-- Minimums enforced by jacoco:check during verify (currently ~94% / ~77%). -->
-    <jacoco.line-coverage.minimum>0.85</jacoco.line-coverage.minimum>
+    <jacoco.line-coverage.minimum>0.95</jacoco.line-coverage.minimum>
     <jacoco.branch-coverage.minimum>0.70</jacoco.branch-coverage.minimum>
     <!--
       Read by CI via help:evaluate to label its coverage comment, not by any
