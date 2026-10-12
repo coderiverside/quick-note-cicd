@@ -49,3 +49,14 @@ jobs:
             path: target/surefire-reports/
             if-no-files-found: warn
             retention-days: 7
+
+      # Also on failure: a coverage-threshold breach is diagnosed from the
+      # report, not from the build log.
+      - name : Upload JaCoCo coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+            name: jacoco-report
+            path: target/jacoco-report
+            if-no-files-found: warn
+            retention-days: 7
