@@ -139,6 +139,7 @@ jobs:
                 java -version
             '
       
+      
       # AWS authentication is only needed for pushes, not pull requests.
       - name: Configure AWS credentials
         if: github.event_name == 'push'
@@ -156,7 +157,8 @@ jobs:
         if: github.event_name == 'push'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: coderiverside/quick-note-cicd
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker tag quick-note-api:${IMAGE_TAG} ${ECR_REGISTRY}/coderiverside/quick-note-api:${IMAGE_TAG}
-          docker push ${ECR_REGISTRY}/coderiverside/quick-note-api:${IMAGE_TAG}
+          docker tag quick-note-api:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
