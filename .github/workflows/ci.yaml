@@ -139,7 +139,6 @@ jobs:
                 java -version
             '
       
-      
       # AWS authentication is only needed for pushes, not pull requests.
       - name: Configure AWS credentials
         if: github.event_name == 'push'
