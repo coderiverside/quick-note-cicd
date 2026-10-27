@@ -138,3 +138,25 @@ jobs:
                 test "$(id -u)" = "185" || { echo "expected uid 185, got $(id -u)"; exit 1; }
                 java -version
             '
+      
+      # AWS authentication is only needed for pushes, not pull requests.
+      - name: Configure AWS credentials
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::734143850199:role/GitHubActionsQuickNoteApiECRRole
+          aws-region: us-west-1
+
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push image to Amazon ECR
+        if: github.event_name == 'push'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker tag quick-note-api:${IMAGE_TAG} ${ECR_REGISTRY}/coderiverside/quick-note-api:${IMAGE_TAG}
+          docker push ${ECR_REGISTRY}/coderiverside/quick-note-api:${IMAGE_TAG}
